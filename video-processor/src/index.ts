@@ -1,40 +1,55 @@
-import express from "express";
-import ffmpeg from "fluent-ffmpeg";
+const express = require("express");
+import { Request, Response } from "express";
+import { convertVid, deleteProcVideo, deleteRawVideo, downloadRawVideo, setupDir, uploadProcVideo } from "./storage";
+
+setupDir();
 
 const app = express();
-app.use(express.json()); //Without this, our app won't know that requests will be coming in JSON and throw an error.
+app.use(express.json());
 
-app.post("/video-processor", (req, res) => {
-    // Get path of the input video
-    const inputPath = req.body.inputPath;
-    // Get path of the output video
-    const outputPath = req.body.outputPath;
+app.post("/video-processor", async (req: Request, res: Response) => {
+    let data;
+    try {
+        const message = Buffer.from(req.body.data, "base64").toString("utf8");
+        data = JSON.parse(message);
 
-    //input and output are both required in our JSON request, so we will need to define them in every post request.
-
-    //Error handling
-    if (!inputPath || !outputPath) {
-        res.status(400).send("Bad Request:Missing input or output path");
-        return;
+        if (!data.name) {
+            throw new Error("No name provided");
+        }
+    } catch (error: any) {
+        console.error(`An error occurred: ${error.message}`);
+        return res.status(400).send(error.message);
     }
 
-    // Start the video processing
-    ffmpeg(inputPath)
-        .outputOptions("-vf", "scale=-1:720") //720p
-        .on("end", () => {
-            console.log("Video processing completed");
-            res.status(200).send("Video processing successfully completed");
-        })
-        .on("error", (err) => {
-            console.error("Error processing video:", err.message);
-            res.status(500).send("Error processing video");
-        })
-        .save(outputPath);
-        
-})
+    const inputFileName = data.name;
+    const outputFileName = `processed-${inputFileName}`;
+
+    //Download the raw video from Cloud Storage
+    await downloadRawVideo(inputFileName);
+
+    try{
+        convertVid(inputFileName, outputFileName);
+    }catch(err: any){
+        await Promise.all([
+            deleteRawVideo(inputFileName), 
+            deleteProcVideo(outputFileName)
+        ]);
+        console.log(`Error processing video: ${err.message}`);
+        return res.status(500).send("Error processing video");
+    }
+
+    //Upload processed vid to Cloud Storage
+    await uploadProcVideo(outputFileName);
+
+    await Promise.all([
+        deleteRawVideo(inputFileName), 
+        deleteProcVideo(outputFileName)
+    ]);
+
+    return res.status(200).send("Video processed successfully");
+});
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
-    console.log(
-        `Video Processor listening at http://localhost:${port}`);
-})
+    console.log(`Video Processor listening at http://localhost:${port}`);
+});
