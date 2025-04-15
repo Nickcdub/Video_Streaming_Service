@@ -4,19 +4,18 @@
 # Stage 1: Build stage
 FROM node:18 AS builder
 
-# Set the working directory in the container to /app
 WORKDIR /app
 
-# Copy package.json and package-lock.json into the working directory
+# Set the environment to development to ensure devDependencies are installed
+ENV NODE_ENV=development
+
 COPY package*.json ./
 
-# Install any needed packages specified in package.json
 RUN npm install
 
-# Bundle app source inside the docker image
 COPY . .
 
-# Build the app
+# Build the app using the installed TypeScript version
 RUN npm run build
 
 # Stage 2: Production stage
